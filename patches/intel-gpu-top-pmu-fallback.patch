@@ -1,0 +1,20 @@
+diff --git a/tools/intel_gpu_top.c b/tools/intel_gpu_top.c
+--- a/tools/intel_gpu_top.c
++++ b/tools/intel_gpu_top.c
+@@ -2741,10 +2741,21 @@
+-	if (card.pci_slot_name[0] && !is_igpu_pci(card.pci_slot_name))
++	if (card.pci_slot_name[0] && !is_igpu_pci(card.pci_slot_name)) {
++		char pmu_path[PATH_MAX];
++
+ 		pmu_device = tr_pmu_name(&card);
+-	else
++		snprintf(pmu_path, sizeof(pmu_path),
++			 "/sys/devices/%s/events", pmu_device);
++
++		if (access(pmu_path, F_OK) != 0) {
++			free(pmu_device);
++			pmu_device = strdup("i915");
++		}
++	} else {
+ 		pmu_device = strdup("i915");
++	}

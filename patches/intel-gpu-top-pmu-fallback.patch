@@ -1,7 +1,7 @@
 diff --git a/tools/intel_gpu_top.c b/tools/intel_gpu_top.c
 --- a/tools/intel_gpu_top.c
 +++ b/tools/intel_gpu_top.c
-@@ -2741,10 +2741,21 @@
+@@ -2744,4 +2744,14 @@
 -	if (card.pci_slot_name[0] && !is_igpu_pci(card.pci_slot_name))
 +	if (card.pci_slot_name[0] && !is_igpu_pci(card.pci_slot_name)) {
 +		char pmu_path[PATH_MAX];

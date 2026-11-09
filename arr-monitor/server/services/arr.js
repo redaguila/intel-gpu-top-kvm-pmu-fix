@@ -7,7 +7,7 @@ const pad = (n) => String(n ?? 0).padStart(2, '0');
 const FLAVORS = {
   sonarr: {
     name: 'Sonarr', color: '#35c5f4', port: 8989, api: '/api/v3',
-    media: 'series', mediaLabel: 'Series', mediaSingular: 'series', lookup: 'series/lookup',
+    media: 'series', mediaLabel: 'Series', mediaSingular: 'series', unit: 'episodes', lookup: 'series/lookup',
     queueInclude: { includeSeries: true, includeEpisode: true },
     calendarInclude: { includeSeries: true },
     historyInclude: { includeSeries: true, includeEpisode: true },
@@ -20,6 +20,11 @@ const FLAVORS = {
       ? `${r.series.title} S${pad(r.episode?.seasonNumber)}E${pad(r.episode?.episodeNumber)}`
       : null,
     recordSubtitle: (r) => r.episode?.title,
+    groupTitle: (records) => {
+      const seasons = [...new Set(records.map((r) => r.episode?.seasonNumber ?? r.seasonNumber).filter((n) => n !== undefined))].sort((a, b) => a - b);
+      const label = seasons.length === 1 ? `S${pad(seasons[0])}` : seasons.length ? `S${pad(seasons[0])}–S${pad(seasons[seasons.length - 1])}` : '';
+      return records[0].series?.title ? `${records[0].series.title}${label ? ` ${label}` : ''}` : null;
+    },
     calendarItem: (e) => ({
       id: e.id, title: e.series?.title || 'Unknown series',
       subtitle: `S${pad(e.seasonNumber)}E${pad(e.episodeNumber)} · ${e.title || 'TBA'}`,
@@ -46,7 +51,7 @@ const FLAVORS = {
   },
   radarr: {
     name: 'Radarr', color: '#ffc230', port: 7878, api: '/api/v3',
-    media: 'movie', mediaLabel: 'Movies', mediaSingular: 'movie', lookup: 'movie/lookup',
+    media: 'movie', mediaLabel: 'Movies', mediaSingular: 'movie', unit: 'movies', lookup: 'movie/lookup',
     queueInclude: { includeMovie: true },
     calendarInclude: {},
     historyInclude: { includeMovie: true },
@@ -80,7 +85,7 @@ const FLAVORS = {
   },
   lidarr: {
     name: 'Lidarr', color: '#00a65b', port: 8686, api: '/api/v1',
-    media: 'artist', mediaLabel: 'Artists', mediaSingular: 'artist', lookup: 'artist/lookup', metadataProfile: true,
+    media: 'artist', mediaLabel: 'Artists', mediaSingular: 'artist', unit: 'albums', lookup: 'artist/lookup', metadataProfile: true,
     queueInclude: { includeArtist: true, includeAlbum: true },
     calendarInclude: { includeArtist: true },
     historyInclude: { includeArtist: true, includeAlbum: true },
@@ -112,7 +117,7 @@ const FLAVORS = {
   },
   readarr: {
     name: 'Readarr', color: '#8e2222', port: 8787, api: '/api/v1',
-    media: 'author', mediaLabel: 'Authors', mediaSingular: 'author', lookup: 'author/lookup', metadataProfile: true,
+    media: 'author', mediaLabel: 'Authors', mediaSingular: 'author', unit: 'books', lookup: 'author/lookup', metadataProfile: true,
     queueInclude: { includeAuthor: true, includeBook: true },
     calendarInclude: { includeAuthor: true },
     historyInclude: { includeAuthor: true, includeBook: true },
@@ -170,24 +175,55 @@ function makeArr(type) {
 
   const command = (cfg, body) => api(cfg, 'command', { method: 'POST', body });
 
-  const queueItem = (r) => {
-    const size = toNum(r.size);
-    const sizeLeft = toNum(r.sizeleft);
-    const warn = r.trackedDownloadStatus && r.trackedDownloadStatus !== 'ok';
-    return {
-      id: r.id,
-      title: f.recordTitle(r) || r.title,
-      subtitle: f.recordSubtitle(r) || r.title,
-      release: r.title,
-      size, sizeLeft,
-      progress: size ? Math.max(0, Math.min(100, ((size - sizeLeft) / size) * 100)) : 0,
-      status: r.trackedDownloadState || r.status,
-      warning: warn ? (r.statusMessages || []).flatMap((m) => m.messages || []).join(' ') || r.errorMessage || r.trackedDownloadStatus : null,
-      eta: parseTimeLeft(r.timeleft),
-      protocol: r.protocol,
-      client: r.downloadClient,
-      actions: ['remove', 'blocklist'],
-    };
+  /**
+   * One queue row per download. A season pack (or multi-album / multi-book release) appears in the
+   * *arr queue once per episode, each record repeating the size of the whole download, so records
+   * sharing a downloadId are merged into a single row whose id lists every record id.
+   */
+  const queueItems = (records) => {
+    const groups = new Map();
+    for (const r of records) {
+      const key = r.downloadId ? `d:${r.downloadId}` : `r:${r.id}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(r);
+    }
+    return [...groups.values()].map((group) => {
+      const r = group[0];
+      const size = Math.max(...group.map((g) => toNum(g.size)));
+      const sizeLeft = Math.max(...group.map((g) => toNum(g.sizeleft)));
+      const warnRecord = group.find((g) => g.trackedDownloadStatus && g.trackedDownloadStatus !== 'ok');
+      const many = group.length > 1;
+      return {
+        id: group.map((g) => g.id).join(','),
+        count: group.length,
+        countLabel: many ? `${group.length} ${f.unit}` : null,
+        title: (many && f.groupTitle?.(group)) || (many ? `${f.recordTitle(r) || r.title} (+${group.length - 1} more)` : f.recordTitle(r) || r.title),
+        subtitle: many ? r.title : f.recordSubtitle(r) || r.title,
+        release: r.title,
+        size, sizeLeft,
+        progress: size ? Math.max(0, Math.min(100, ((size - sizeLeft) / size) * 100)) : 0,
+        status: r.trackedDownloadState || r.status,
+        warning: warnRecord ? (warnRecord.statusMessages || []).flatMap((m) => m.messages || []).join(' ') || warnRecord.errorMessage || warnRecord.trackedDownloadStatus : null,
+        eta: parseTimeLeft(r.timeleft),
+        protocol: r.protocol,
+        client: r.downloadClient,
+        actions: ['remove', 'blocklist'],
+      };
+    });
+  };
+
+  const queueIds = (id) => {
+    const ids = String(id ?? '').split(',').map((x) => Number(x)).filter((n) => Number.isInteger(n) && n > 0);
+    if (!ids.length) throw badRequest('id is required');
+    return ids;
+  };
+
+  const removeFromQueue = async (cfg, id, blocklist) => {
+    const ids = queueIds(id);
+    const q = qs({ removeFromClient: true, blocklist });
+    if (ids.length === 1) await api(cfg, `queue/${ids[0]}${q}`, { method: 'DELETE' });
+    else await api(cfg, `queue/bulk${q}`, { method: 'DELETE', body: { ids } });
+    return { ok: true };
   };
 
   return {
@@ -221,7 +257,7 @@ function makeArr(type) {
       async queue(cfg) {
         const data = await api(cfg, `queue${qs({ page: 1, pageSize: 200, ...f.queueInclude })}`);
         const records = Array.isArray(data) ? data : data.records || [];
-        return records.map(queueItem);
+        return queueItems(records);
       },
 
       async calendar(cfg, query) {
@@ -281,14 +317,8 @@ function makeArr(type) {
         if (!id) throw badRequest('id is required');
         return command(cfg, f.wantedSearch(Number(id)));
       },
-      async remove(cfg, { id }) {
-        await api(cfg, `queue/${Number(id)}${qs({ removeFromClient: true, blocklist: false })}`, { method: 'DELETE' });
-        return { ok: true };
-      },
-      async blocklist(cfg, { id }) {
-        await api(cfg, `queue/${Number(id)}${qs({ removeFromClient: true, blocklist: true })}`, { method: 'DELETE' });
-        return { ok: true };
-      },
+      remove: (cfg, { id }) => removeFromQueue(cfg, id, false),
+      blocklist: (cfg, { id }) => removeFromQueue(cfg, id, true),
       async lookup(cfg, { term }) {
         if (!term) throw badRequest('term is required');
         const results = await api(cfg, `${f.lookup}${qs({ term })}`);

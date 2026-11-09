@@ -14,7 +14,8 @@ A self-hosted web dashboard to **monitor and control your whole \*arr stack from
 | Indexer manager | **Prowlarr** | Search all indexers and grab results, indexer health (failing / disabled), history |
 | Subtitles | **Bazarr** | Wanted subtitles for episodes and movies, history, health, trigger searches |
 | Usenet clients | **SABnzbd, NZBGet** | Live speed, queue with progress and ETA, pause / resume / delete items, pause / resume everything, speed limit, history (with failure reasons) |
-| Torrent clients | **qBittorrent (4.x & 5.x), Transmission, Deluge** | Live up/down speed, torrents with progress / ratio / peers, pause / resume / delete (optionally with files), pause / resume all, alt-speed toggle, speed limit |
+| Torrent clients | **qBittorrent (4.x & 5.x), Transmission, Deluge**, plus qBittorrent-compatible clients such as **rdt-client** | Live up/down speed, torrents with progress / ratio / peers, pause / resume / delete (optionally with files), pause / resume all, alt-speed toggle, speed limit |
+| Debrid | **Real-Debrid** | Account type and premium days left (with a warning before it expires), cloud torrents with progress and speed, failed torrents, delete, unrestricted-download history |
 | Requests | **Overseerr, Jellyseerr** | Request list with posters and status, approve / decline pending requests |
 | Statistics | **Tautulli** | Current streams (direct play vs transcode, bandwidth), watch history |
 
@@ -52,8 +53,12 @@ Where to find the credentials:
 | qBittorrent | Web UI username / password |
 | Transmission | RPC username / password (leave empty if disabled) |
 | Deluge | Web UI password |
+| rdt-client | Add it as **qBittorrent**, with the same URL, username and password Sonarr/Radarr use for it |
+| Real-Debrid | API token from https://real-debrid.com/apitoken (the API URL is pre-filled) |
 | Overseerr / Jellyseerr | Settings → General → API Key |
 | Tautulli | Settings → Web Interface → API Key |
+
+Season packs (and multi-album / multi-book releases) show as one row in the *arr queue, with removal applying to the whole pack.
 
 If a service runs behind a URL base (e.g. `http://host/sonarr`), include it in the URL.
 

@@ -270,10 +270,14 @@ test('rdt-client works as a qBittorrent client', async () => {
   const st = await get(`/api/services/${id}/status`);
   assert.equal(st.online, true, st.error);
   assert.equal(st.version, null);
-  assert.equal(st.downloadSpeed, 8e6); // summed from torrents because transfer/info is missing
+  assert.equal(st.downloadSpeed, 8e6); // per-torrent speeds win over transfer/info's 0 during the Real-Debrid phase
+  assert.equal(st.uploadSpeed, 0);
   assert.equal(st.paused, false); // a finished "pausedUP" torrent does not make the client look paused
   const q = await get(`/api/services/${id}/r/queue`);
   assert.equal(q.find((t) => t.progress === 100).completed, true);
+  const active = q.find((t) => t.progress === 75);
+  assert.equal(active.speed, 8e6);
+  assert.equal(active.uploadSpeed, 0); // mirrored upspeed is ignored
   await act(id, 'pause', { id: 'f'.repeat(40) });
   assert.equal(mock.state.log.find((l) => l.kind === 'rdtclient').action, 'pause');
 });

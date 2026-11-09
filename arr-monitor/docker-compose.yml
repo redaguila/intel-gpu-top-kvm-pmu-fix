@@ -1,0 +1,20 @@
+services:
+  arr-monitor:
+    build: .
+    container_name: arr-monitor
+    restart: unless-stopped
+    ports:
+      - "8484:8484"
+    volumes:
+      - ./config:/config
+    environment:
+      # Strongly recommended if the dashboard is reachable outside your LAN:
+      # AUTH_USERNAME: admin
+      # AUTH_PASSWORD: change-me
+      TZ: Etc/UTC
+    # If your *arr apps run in Docker, join their network so you can use
+    # container names in URLs (e.g. http://sonarr:8989):
+    # networks: [media]
+# networks:
+#   media:
+#     external: true

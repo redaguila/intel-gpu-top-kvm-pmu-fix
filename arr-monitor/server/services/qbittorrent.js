@@ -97,7 +97,9 @@ export const qbittorrent = {
     return {
       version: version ? String(version).trim() : null,
       appName: 'qBittorrent',
-      downloadSpeed: info && info.dl_info_speed !== undefined ? toNum(info.dl_info_speed) : sum('dlspeed'),
+      // rdt-client's transfer/info only counts its local download phase, while each torrent's dlspeed
+      // also covers the Real-Debrid phase, so take whichever is larger (real qBittorrent: they match).
+      downloadSpeed: Math.max(toNum(info?.dl_info_speed), sum('dlspeed')),
       uploadSpeed: info && info.up_info_speed !== undefined ? toNum(info.up_info_speed) : sum('upspeed'),
       // Finished torrents are "pausedUP"/"stoppedUP"; only unfinished ones decide whether the client is paused.
       paused: incomplete.length > 0 && incomplete.every((t) => isPaused(t.state)),
@@ -110,7 +112,13 @@ export const qbittorrent = {
 
   resources: {
     async queue(cfg) {
-      const torrents = await api(cfg, 'torrents/info?sort=added_on&reverse=true');
+      const [torrents, info] = await Promise.all([
+        api(cfg, 'torrents/info?sort=added_on&reverse=true'),
+        api(cfg, 'transfer/info').catch(() => null),
+      ]);
+      // rdt-client copies each torrent's download speed into upspeed although it never uploads; when the
+      // client reports no upload at all, per-torrent upload figures can't be real.
+      const noUpload = info && info.up_info_speed !== undefined && toNum(info.up_info_speed) === 0;
       return torrents.map((t) => ({
         id: t.hash,
         title: t.name,
@@ -121,7 +129,7 @@ export const qbittorrent = {
         status: STATE_LABELS[t.state] || t.state,
         eta: t.eta > 0 && t.eta < 8640000 ? t.eta : null,
         speed: toNum(t.dlspeed),
-        uploadSpeed: toNum(t.upspeed),
+        uploadSpeed: noUpload ? 0 : toNum(t.upspeed),
         category: t.category,
         protocol: 'torrent',
         completed: toNum(t.progress) >= 1,

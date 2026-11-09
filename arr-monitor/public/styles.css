@@ -228,6 +228,8 @@ td.t { max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space:
   .detail { flex-direction: column; }
   .topbar-right .btn-label { display: none; }
   .toolbar .grow { flex: 1 1 100%; }
+  /* iOS Safari zooms the page when focusing a text field smaller than 16px. */
+  .input, select.input { font-size: 16px; }
   .svc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .svc-card { padding: 9px; gap: 8px; }
   .row .right { max-width: 90px; }

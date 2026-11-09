@@ -35,7 +35,7 @@ export function createState() {
     nzbgetPaused: false,
     rdtTorrents: [
       { hash: 'e'.repeat(40), name: 'Better.Call.Saul.S01.1080p.BluRay.x264-ROVERS', size: 44.1e9, amount_left: 0, progress: 1, dlspeed: 0, upspeed: 0, eta: 0, state: 'pausedUP', category: 'tv-sonarr', ratio: 0, num_seeds: 0, num_leechs: 0, added_on: 5 },
-      { hash: 'f'.repeat(40), name: 'Cloud.Harbor.2026.2160p', size: 20e9, amount_left: 5e9, progress: 0.75, dlspeed: 8e6, upspeed: 0, eta: 625, state: 'downloading', category: 'radarr', ratio: 0, num_seeds: 0, num_leechs: 0, added_on: 6 },
+      { hash: 'f'.repeat(40), name: 'Cloud.Harbor.2026.2160p', size: 20e9, amount_left: 5e9, progress: 0.75, dlspeed: 8e6, upspeed: 8e6, eta: 625, state: 'downloading', category: 'radarr', ratio: 0, num_seeds: 0, num_leechs: 0, added_on: 6 },
     ],
     rdTorrents: [
       { id: 'RDAAA1', filename: 'Better.Call.Saul.S01.1080p.BluRay.x264-ROVERS', hash: 'e'.repeat(40), bytes: 44.1e9, host: 'real-debrid.com', progress: 100, status: 'downloaded', links: ['l1', 'l2'], added: iso(-1) },
@@ -271,7 +271,9 @@ function qbHandler(state) {
 }
 
 // rdt-client exposes a qBittorrent-compatible API: 401 when not logged in, finished torrents are
-// "pausedUP". This mock also omits app/version and transfer/info to exercise the optional paths.
+// "pausedUP", transfer/info only counts the local download phase (0 while Real-Debrid is still
+// fetching) and every torrent's upspeed mirrors its dlspeed. app/version is omitted here to
+// exercise the optional path.
 function rdtClientHandler(state) {
   const COOKIE = 'SID=CfDJ8rdtclientcookie';
   return async (req, res, sub) => {
@@ -282,6 +284,7 @@ function rdtClientHandler(state) {
     }
     if (!String(req.headers.cookie || '').includes(COOKIE)) return send(res, 401, '');
     if (sub === '/api/v2/torrents/info') return send(res, 200, state.rdtTorrents);
+    if (sub === '/api/v2/transfer/info') return send(res, 200, { connection_status: 'connected', dl_info_speed: 0, up_info_speed: 0, dl_rate_limit: 0 });
     if (sub === '/api/v2/torrents/pause' || sub === '/api/v2/torrents/resume' || sub === '/api/v2/torrents/delete') {
       const body = new URLSearchParams(await readBody(req));
       state.log.push({ kind: 'rdtclient', action: sub.split('/').pop(), hashes: body.get('hashes') });

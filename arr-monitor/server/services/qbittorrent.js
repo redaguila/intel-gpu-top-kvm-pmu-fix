@@ -25,8 +25,9 @@ async function login(cfg) {
     responseType: 'text',
   });
   if (String(res.data).trim() !== 'Ok.') throw new UpstreamError('qBittorrent login failed (check username / password)', 401);
+  // qBittorrent uses SID (or QBT_SID_<port>); emulators such as rdt-client may use other names, so keep them all.
   const cookie = (res.headers.getSetCookie?.() || [res.headers.get('set-cookie') || ''])
-    .map((c) => c.split(';')[0]).filter((c) => /^(SID|QBT_SID)/i.test(c)).join('; ');
+    .map((c) => c.split(';')[0].trim()).filter((c) => c.includes('=')).join('; ');
   sessions.set(key(cfg), cookie);
   return cookie;
 }
@@ -43,7 +44,8 @@ async function api(cfg, path, opts = {}, retried = false) {
     });
     return res.data;
   } catch (err) {
-    if (!retried && err instanceof UpstreamError && err.status === 403) {
+    // Expired session: qBittorrent answers 403, rdt-client answers 401.
+    if (!retried && err instanceof UpstreamError && (err.status === 403 || err.status === 401)) {
       sessions.delete(key(cfg));
       return api(cfg, path, opts, true);
     }
@@ -82,22 +84,27 @@ export const qbittorrent = {
   speedLimit: true,
 
   async status(cfg) {
-    const [version, info, all] = await Promise.all([
-      api(cfg, 'app/version', { responseType: 'text' }),
-      api(cfg, 'transfer/info'),
-      api(cfg, 'torrents/info').catch(() => []),
+    // torrents/info doubles as the credential check; version and transfer/info are optional because
+    // qBittorrent emulators (rdt-client, Decypharr, …) don't always implement them.
+    const all = await api(cfg, 'torrents/info');
+    const [version, info] = await Promise.all([
+      api(cfg, 'app/version', { responseType: 'text' }).catch(() => null),
+      api(cfg, 'transfer/info').catch(() => null),
     ]);
-    const downloading = all.filter((t) => t.progress < 1 && !isPaused(t.state));
+    const incomplete = all.filter((t) => toNum(t.progress) < 1);
+    const downloading = incomplete.filter((t) => !isPaused(t.state));
+    const sum = (key) => all.reduce((a, t) => a + toNum(t[key]), 0);
     return {
-      version: String(version).trim(),
+      version: version ? String(version).trim() : null,
       appName: 'qBittorrent',
-      downloadSpeed: toNum(info.dl_info_speed),
-      uploadSpeed: toNum(info.up_info_speed),
-      paused: all.length > 0 && all.every((t) => isPaused(t.state)),
+      downloadSpeed: info && info.dl_info_speed !== undefined ? toNum(info.dl_info_speed) : sum('dlspeed'),
+      uploadSpeed: info && info.up_info_speed !== undefined ? toNum(info.up_info_speed) : sum('upspeed'),
+      // Finished torrents are "pausedUP"/"stoppedUP"; only unfinished ones decide whether the client is paused.
+      paused: incomplete.length > 0 && incomplete.every((t) => isPaused(t.state)),
       queueCount: downloading.length,
       activeCount: all.filter((t) => t.dlspeed > 0 || t.upspeed > 0).length,
       sizeLeft: downloading.reduce((a, t) => a + toNum(t.amount_left), 0),
-      speedLimit: info.dl_rate_limit ? `${Math.round(info.dl_rate_limit / 1024)} KB/s` : null,
+      speedLimit: info?.dl_rate_limit ? `${Math.round(info.dl_rate_limit / 1024)} KB/s` : null,
     };
   },
 

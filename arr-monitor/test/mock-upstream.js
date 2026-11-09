@@ -33,7 +33,17 @@ export function createState() {
       { id: 1, hashString: 'c'.repeat(40), name: 'Linux.Distro.2026.iso', totalSize: 4e9, leftUntilDone: 1e9, percentDone: 0.75, rateDownload: 3e6, rateUpload: 2e5, eta: 333, status: 4, error: 0, errorString: '', uploadRatio: 0.3, peersConnected: 12, labels: ['iso'], addedDate: 10 },
     ],
     nzbgetPaused: false,
+    rdtTorrents: [
+      { hash: 'e'.repeat(40), name: 'Better.Call.Saul.S01.1080p.BluRay.x264-ROVERS', size: 44.1e9, amount_left: 0, progress: 1, dlspeed: 0, upspeed: 0, eta: 0, state: 'pausedUP', category: 'tv-sonarr', ratio: 0, num_seeds: 0, num_leechs: 0, added_on: 5 },
+      { hash: 'f'.repeat(40), name: 'Cloud.Harbor.2026.2160p', size: 20e9, amount_left: 5e9, progress: 0.75, dlspeed: 8e6, upspeed: 0, eta: 625, state: 'downloading', category: 'radarr', ratio: 0, num_seeds: 0, num_leechs: 0, added_on: 6 },
+    ],
+    rdTorrents: [
+      { id: 'RDAAA1', filename: 'Better.Call.Saul.S01.1080p.BluRay.x264-ROVERS', hash: 'e'.repeat(40), bytes: 44.1e9, host: 'real-debrid.com', progress: 100, status: 'downloaded', links: ['l1', 'l2'], added: iso(-1) },
+      { id: 'RDBBB2', filename: 'Cloud.Harbor.2026.2160p', hash: 'f'.repeat(40), bytes: 20e9, host: 'real-debrid.com', progress: 40, status: 'downloading', speed: 50e6, seeders: 30, links: [], added: iso(-0.01) },
+      { id: 'RDCCC3', filename: 'Broken.Upload', bytes: 1e9, host: 'real-debrid.com', progress: 0, status: 'magnet_error', links: [], added: iso(-2) },
+    ],
     sonarrQueue: [
+      ...[1, 2, 3].map((ep) => ({ id: 200 + ep, downloadId: 'PACK1HASH', title: 'Better.Call.Saul.S01.1080p.BluRay.x264-ROVERS', size: 44130000000, sizeleft: 0, status: 'downloading', trackedDownloadStatus: 'ok', trackedDownloadState: 'downloading', protocol: 'torrent', downloadClient: 'RDTClient', series: { title: 'Better Call Saul' }, episode: { seasonNumber: 1, episodeNumber: ep, title: `Episode ${ep}` } })),
       { id: 101, title: 'Night.Signal.S02E05.1080p.WEB-DL', size: 2412000000, sizeleft: 860000000, status: 'downloading', trackedDownloadStatus: 'ok', trackedDownloadState: 'downloading', timeleft: '00:04:12', protocol: 'usenet', downloadClient: 'SABnzbd', series: { title: 'Night Signal' }, episode: { seasonNumber: 2, episodeNumber: 5, title: 'Static' } },
       { id: 102, title: 'Copper.Valley.S01E03.1080p', size: 1500000000, sizeleft: 0, status: 'completed', trackedDownloadStatus: 'warning', trackedDownloadState: 'importPending', statusMessages: [{ title: 'x', messages: ['No files found are eligible for import'] }], protocol: 'torrent', downloadClient: 'qBittorrent', series: { title: 'Copper Valley' }, episode: { seasonNumber: 1, episodeNumber: 3, title: 'Ore' } },
     ],
@@ -85,10 +95,20 @@ function arrHandler(kind, state) {
     const appName = kind[0].toUpperCase() + kind.slice(1);
     if (p === '/system/status') return send(res, 200, { appName, version: kind === 'sonarr' ? '4.0.9.2244' : '5.14.0.9383' });
     if (p === '/diskspace') return send(res, 200, [{ path: '/data', freeSpace: 1.2e12, totalSpace: 4e12 }]);
-    if (p === '/health') return send(res, 200, kind === 'radarr' ? [{ source: 'IndexerStatusCheck', type: 'warning', message: 'Indexers unavailable due to failures: NZBFinder', wikiUrl: 'https://wiki.servarr.com/radarr/system#indexers-are-unavailable-due-to-failures' }] : []);
+    if (p === '/health') {
+      if (kind === 'radarr') return send(res, 200, [{ source: 'IndexerStatusCheck', type: 'warning', message: 'Indexers unavailable due to failures: NZBFinder', wikiUrl: 'https://wiki.servarr.com/radarr/system#indexers-are-unavailable-due-to-failures' }]);
+      if (kind === 'sonarr') return send(res, 200, [{ source: 'RemotePathMappingCheck', type: 'error', message: 'You are using docker; download client RDTClient places downloads in /data/downloads/rdt-client/tv-sonarr/Better.Call.Saul.S01.1080p.BluRay.x264-ROVERS but this directory does not appear to exist inside the container. Review your remote path mappings and container volume settings.', wikiUrl: 'https://wiki.servarr.com/sonarr/system#docker-bad-remote-path-mapping' }]);
+      return send(res, 200, []);
+    }
     if (p === '/queue') {
       if (kind === 'sonarr') return send(res, 200, { page: 1, totalRecords: state.sonarrQueue.length, records: state.sonarrQueue });
       return send(res, 200, { page: 1, totalRecords: 0, records: [] });
+    }
+    if (p === '/queue/bulk' && req.method === 'DELETE') {
+      const { ids } = JSON.parse(await readBody(req));
+      state.log.push({ kind, action: 'deleteQueueBulk', ids, query: url.search });
+      state.sonarrQueue = state.sonarrQueue.filter((q) => !ids.includes(q.id));
+      return send(res, 200, {});
     }
     if (p.startsWith('/queue/') && req.method === 'DELETE') {
       const id = Number(p.split('/')[2]);
@@ -250,6 +270,44 @@ function qbHandler(state) {
   };
 }
 
+// rdt-client exposes a qBittorrent-compatible API: 401 when not logged in, finished torrents are
+// "pausedUP". This mock also omits app/version and transfer/info to exercise the optional paths.
+function rdtClientHandler(state) {
+  const COOKIE = 'SID=CfDJ8rdtclientcookie';
+  return async (req, res, sub) => {
+    if (sub === '/api/v2/auth/login') {
+      const body = new URLSearchParams(await readBody(req));
+      if (body.get('username') === USER && body.get('password') === PASS) return send(res, 200, 'Ok.', { 'Set-Cookie': `${COOKIE}; path=/; samesite=lax; httponly` });
+      return send(res, 200, 'Fails.');
+    }
+    if (!String(req.headers.cookie || '').includes(COOKIE)) return send(res, 401, '');
+    if (sub === '/api/v2/torrents/info') return send(res, 200, state.rdtTorrents);
+    if (sub === '/api/v2/torrents/pause' || sub === '/api/v2/torrents/resume' || sub === '/api/v2/torrents/delete') {
+      const body = new URLSearchParams(await readBody(req));
+      state.log.push({ kind: 'rdtclient', action: sub.split('/').pop(), hashes: body.get('hashes') });
+      return send(res, 200, '');
+    }
+    return send(res, 404, '');
+  };
+}
+
+function realDebridHandler(state) {
+  return (req, res, sub) => {
+    if (req.headers.authorization !== `Bearer ${API_KEY}`) return send(res, 401, { error: 'bad_token', error_code: 8 });
+    const p = sub.replace('/rest/1.0', '');
+    if (p === '/user') return send(res, 200, { id: 1, username: 'dan', type: 'premium', points: 1200, premium: 5 * 86400 + 3600, expiration: iso(5) });
+    if (p === '/torrents') return send(res, 200, state.rdTorrents);
+    if (p === '/downloads') return send(res, 200, [{ id: 'DL1', filename: 'Better.Call.Saul.S01E01.mkv', filesize: 4.1e9, host: 'real-debrid.com', generated: iso(-0.1) }]);
+    const m = p.match(/^\/torrents\/delete\/(\w+)$/);
+    if (m && req.method === 'DELETE') {
+      state.log.push({ kind: 'realdebrid', action: 'delete', id: m[1] });
+      state.rdTorrents = state.rdTorrents.filter((t) => t.id !== m[1]);
+      res.writeHead(204); return res.end();
+    }
+    return send(res, 404, { error: 'unknown_ressource' });
+  };
+}
+
 function transmissionHandler(state) {
   const SESSION = 'mock-transmission-session';
   return async (req, res, sub) => {
@@ -329,6 +387,7 @@ export function createMockUpstream(state = createState()) {
     prowlarr: prowlarrHandler(state), bazarr: bazarrHandler(state), sabnzbd: sabHandler(state),
     nzbget: nzbgetHandler(state), qbittorrent: qbHandler(state), transmission: transmissionHandler(state),
     deluge: delugeHandler(state), overseerr: overseerrHandler(state), tautulli: tautulliHandler(state),
+    rdtclient: rdtClientHandler(state), realdebrid: realDebridHandler(state),
   };
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');

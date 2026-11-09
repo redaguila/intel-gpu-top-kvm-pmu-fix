@@ -234,7 +234,7 @@ function queueRow(item, serviceId, { showService = false } = {}) {
     ${showService ? badge({ type: item.serviceType, name: item.serviceName }, item.color) : ''}
     <div class="grow">
       <div class="title" title="${esc(item.release || item.title)}">${esc(item.title)}</div>
-      <div class="sub">${sub}</div>
+      <div class="sub">${item.countLabel ? `<span class="tag">${esc(item.countLabel)}</span> ` : ''}${sub}</div>
       ${item.warning ? `<div class="warning">⚠ ${esc(item.warning)}</div>` : ''}
       <div class="progress${paused ? ' paused' : ''}" style="--c:${esc(item.color || '')}"><i style="width:${Math.max(0, Math.min(100, item.progress || 0)).toFixed(1)}%"></i></div>
     </div>
@@ -287,7 +287,7 @@ function healthList(items, { showService = false } = {}) {
   if (!items.length) return empty('No issues 🎉');
   return items.map((h) => `<div class="row">
     <span class="tag ${h.type === 'error' ? 'err' : 'warn'}">${esc(h.type || 'warning')}</span>
-    <div class="grow"><div class="title" style="white-space:normal">${esc(h.message)}</div>
+    <div class="grow"><div class="title wrap">${esc(h.message)}</div>
     <div class="sub">${showService ? `${esc(h.serviceName)} · ` : ''}${esc(h.source || '')}</div></div>
     ${h.wikiUrl && /^https?:/.test(h.wikiUrl) ? `<a class="btn small" href="${esc(h.wikiUrl)}" target="_blank" rel="noopener">Wiki</a>` : ''}
   </div>`).join('');
@@ -370,7 +370,7 @@ function drawDashboard(d, reload) {
   window.scrollTo(0, scroll);
   bindQueueActions($('#dash-queue'), reload);
   const all = (action) => async () => {
-    await Promise.allSettled(downloads.filter((s) => s.status.online).map((s) => api(`services/${encodeURIComponent(s.id)}/a/${action}`, { method: 'POST', body: {} })));
+    await Promise.allSettled(downloads.filter((s) => s.status.online && state.typeMap[s.type]?.globalActions.some((g) => g.id === action)).map((s) => api(`services/${encodeURIComponent(s.id)}/a/${action}`, { method: 'POST', body: {} })));
     toast(action === 'pauseAll' ? 'All clients paused' : 'All clients resumed');
     reload();
   };
@@ -394,7 +394,7 @@ async function renderService(id, tab, token) {
   const actions = type.globalActions.map((a) => `<button class="btn small" data-ga="${esc(a.id)}" data-confirm="${a.confirm ? 1 : ''}">${esc(a.label)}</button>`).join('');
   setTitle(`${badge(svc)} <span>${esc(svc.name)}</span>`, `
     ${type.canAdd ? `<button class="btn small primary" id="add-media" title="Add ${esc(type.mediaSingular)}">＋ <span class="btn-label">Add ${esc(type.mediaSingular)}</span></button>` : ''}
-    <a class="btn small" href="${esc(svc.url)}" target="_blank" rel="noopener" title="Open web UI">↗ <span class="btn-label">Open</span></a>`);
+    <a class="btn small" href="${esc(type.webUrl || svc.url)}" target="_blank" rel="noopener" title="Open web UI">↗ <span class="btn-label">Open</span></a>`);
 
 
   const speedCtl = type.speedLimit ? `<div class="speed-ctl">
@@ -439,7 +439,7 @@ function statusLine(type, st) {
   if (!st.online) return `<div style="display:flex;gap:10px;align-items:center"><span class="dot err"></span><div><b>Offline</b><div class="small" style="color:var(--err)">${esc(st.error)}</div></div></div>`;
   const items = [
     ['Status', `<span class="dot ok" style="display:inline-block;margin-right:6px"></span>Online`],
-    ['Version', esc(fmtVersion(st.version))],
+    ...(st.version ? [['Version', esc(fmtVersion(st.version))]] : []),
     ['Latency', `${esc(st.latency ?? '?')} ms`],
   ];
   if (type.category === 'download') {
@@ -837,7 +837,7 @@ function renderServiceForm(existing, typeName) {
   const v = existing || { name: type.name, enabled: true, showOnDashboard: true };
   setTitle(`${badge({ type: type.type, name: type.name }, type.color)} ${existing ? `Edit ${esc(existing.name)}` : `Add ${esc(type.name)}`}`, '<a class="btn small" href="#/settings">Cancel</a>');
   const fieldHtml = (f) => {
-    const val = v[f.key] ?? '';
+    const val = v[f.key] ?? (existing ? '' : f.default) ?? '';
     const isSecret = f.type === 'password';
     return `<div class="field"><label for="f-${esc(f.key)}">${esc(f.label)}${f.required ? ' *' : ''}</label>
       <input class="input" id="f-${esc(f.key)}" name="${esc(f.key)}" type="${isSecret ? 'password' : f.type === 'url' ? 'url' : 'text'}"
@@ -873,7 +873,7 @@ function renderServiceForm(existing, typeName) {
     try {
       const r = await api('services/test', { method: 'POST', body: { ...collect(), id: existing?.id } });
       out.innerHTML = r.ok
-        ? `<div class="tag ok" style="padding:6px 10px">✓ Connected to ${esc(r.status.appName || type.name)} v${esc(fmtVersion(r.status.version))} in ${esc(r.latency)} ms</div>`
+        ? `<div class="tag ok" style="padding:6px 10px">✓ Connected to ${esc(r.status.appName || type.name)}${r.status.version ? ` v${esc(fmtVersion(r.status.version))}` : ''}${r.status.account ? ` as ${esc(r.status.account)}` : ''} in ${esc(r.latency)} ms</div>`
         : errorBox(r.error);
     } catch (err) { out.innerHTML = errorBox(err); }
   });

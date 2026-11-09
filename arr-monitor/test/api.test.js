@@ -37,11 +37,14 @@ before(async () => {
     ['nzbget', { username: USER, password: PASS }], ['qbittorrent', { username: USER, password: PASS }],
     ['transmission', { username: USER, password: PASS }], ['deluge', { password: PASS }],
     ['overseerr', { apiKey: API_KEY }], ['tautulli', { apiKey: API_KEY }],
+    ['realdebrid', { apiKey: API_KEY }],
+    // rdt-client is configured as a qBittorrent instance.
+    ['qbittorrent', { username: USER, password: PASS }, 'rdtclient'],
   ];
-  for (const [type, extra] of services) {
-    const r = await call('POST', '/api/services', { type, name: type, url: `${upstream}/${type}`, ...extra });
+  for (const [type, extra, path_ = type] of services) {
+    const r = await call('POST', '/api/services', { type, name: path_, url: `${upstream}/${path_}`, ...extra });
     assert.equal(r.status, 200, JSON.stringify(r.data));
-    ids[type] = r.data.id;
+    ids[path_] = r.data.id;
   }
 });
 
@@ -63,7 +66,7 @@ test('parseTimeLeft handles arr, SAB and .NET formats', () => {
 test('types endpoint lists every adapter', async () => {
   const types = await get('/api/types');
   const names = types.map((t) => t.type);
-  for (const t of Object.keys(ids)) assert.ok(names.includes(t), t);
+  for (const t of Object.keys(ids).filter((k) => k !== 'rdtclient')) assert.ok(names.includes(t), t);
 });
 
 test('secrets are never returned to the browser and survive updates', async () => {
@@ -108,17 +111,27 @@ test('every service reports online', async () => {
   for (const [type, id] of Object.entries(ids)) {
     const st = await get(`/api/services/${id}/status`);
     assert.equal(st.online, true, `${type}: ${st.error}`);
-    assert.ok(st.version, `${type} has a version`);
+    // Real-Debrid has no version, and rdt-client doesn't expose one.
+    if (!['realdebrid', 'rdtclient'].includes(type)) assert.ok(st.version, `${type} has a version`);
   }
 });
 
 test('sonarr queue, calendar, library, wanted, history and actions', async () => {
   const id = ids.sonarr;
   const queue = await get(`/api/services/${id}/r/queue`);
-  assert.equal(queue[0].title, 'Night Signal S02E05');
-  assert.equal(queue[0].eta, 252);
-  assert.ok(queue[0].progress > 60 && queue[0].progress < 70);
-  assert.match(queue[1].warning, /eligible for import/);
+  // The three episode records of the season pack collapse into one row.
+  assert.equal(queue.length, 3);
+  assert.equal(queue[0].title, 'Better Call Saul S01');
+  assert.equal(queue[0].count, 3);
+  assert.equal(queue[0].id, '201,202,203');
+  assert.equal(queue[0].size, 44130000000);
+  assert.equal(queue[0].progress, 100);
+  assert.equal(queue[0].countLabel, '3 episodes');
+  assert.match(queue[0].subtitle, /^Better\.Call\.Saul\.S01/);
+  assert.equal(queue[1].title, 'Night Signal S02E05');
+  assert.equal(queue[1].eta, 252);
+  assert.ok(queue[1].progress > 60 && queue[1].progress < 70);
+  assert.match(queue[2].warning, /eligible for import/);
 
   const cal = await get(`/api/services/${id}/r/calendar`);
   assert.equal(cal.length, 3);
@@ -146,7 +159,15 @@ test('sonarr queue, calendar, library, wanted, history and actions', async () =>
   await act(id, 'blocklist', { id: 102 });
   const del = mock.state.log.find((l) => l.action === 'deleteQueue');
   assert.match(del.query, /blocklist=true/);
+  assert.equal((await get(`/api/services/${id}/r/queue`)).length, 2);
+
+  // Removing a grouped row removes every record of the pack in one bulk call.
+  await act(id, 'remove', { id: '201,202,203' });
+  const bulk = mock.state.log.find((l) => l.action === 'deleteQueueBulk');
+  assert.deepEqual(bulk.ids, [201, 202, 203]);
+  assert.match(bulk.query, /blocklist=false/);
   assert.equal((await get(`/api/services/${id}/r/queue`)).length, 1);
+  assert.equal((await call('POST', `/api/services/${id}/a/remove`, { id: 'abc' })).status, 400);
 });
 
 test('sonarr lookup and add', async () => {
@@ -242,6 +263,44 @@ test('qbittorrent wrong password reports a clear error', async () => {
   const r = await call('POST', '/api/services/test', { type: 'qbittorrent', url: `${upstream}/qbittorrent`, username: USER, password: 'nope' });
   assert.equal(r.data.ok, false);
   assert.match(r.data.error, /login failed/);
+});
+
+test('rdt-client works as a qBittorrent client', async () => {
+  const id = ids.rdtclient;
+  const st = await get(`/api/services/${id}/status`);
+  assert.equal(st.online, true, st.error);
+  assert.equal(st.version, null);
+  assert.equal(st.downloadSpeed, 8e6); // summed from torrents because transfer/info is missing
+  assert.equal(st.paused, false); // a finished "pausedUP" torrent does not make the client look paused
+  const q = await get(`/api/services/${id}/r/queue`);
+  assert.equal(q.find((t) => t.progress === 100).completed, true);
+  await act(id, 'pause', { id: 'f'.repeat(40) });
+  assert.equal(mock.state.log.find((l) => l.kind === 'rdtclient').action, 'pause');
+});
+
+test('real-debrid account, torrents, health and delete', async () => {
+  const id = ids.realdebrid;
+  const st = await get(`/api/services/${id}/status`);
+  assert.equal(st.online, true, st.error);
+  assert.equal(st.account, 'dan');
+  assert.equal(st.counts['Premium days left'], 5);
+  assert.equal(st.downloadSpeed, 50e6);
+  const q = await get(`/api/services/${id}/r/queue`);
+  assert.equal(q.length, 3);
+  assert.equal(q[0].completed, true);
+  assert.equal(q[1].status, 'Downloading');
+  assert.equal(q[2].warning, 'Magnet error');
+  const health = await get(`/api/services/${id}/r/health`);
+  assert.ok(health.some((h) => /expires in 5 day/.test(h.message)));
+  assert.ok(health.some((h) => /1 torrent\(s\) failed/.test(h.message)));
+  const hist = await get(`/api/services/${id}/r/history`);
+  assert.equal(hist[0].title, 'Better.Call.Saul.S01E01.mkv');
+  await act(id, 'delete', { id: 'RDCCC3' });
+  assert.equal((await get(`/api/services/${id}/r/queue`)).length, 2);
+  assert.equal((await call('POST', `/api/services/${id}/a/delete`, { id: '../user' })).status, 400);
+  const bad = await call('POST', '/api/services/test', { type: 'realdebrid', url: `${upstream}/realdebrid`, apiKey: 'nope' });
+  assert.equal(bad.data.ok, false);
+  assert.match(bad.data.error, /401/);
 });
 
 test('transmission session handshake and controls', async () => {

@@ -8,8 +8,9 @@ import { transmission } from './transmission.js';
 import { deluge } from './deluge.js';
 import { overseerr, jellyseerr } from './overseerr.js';
 import { tautulli } from './tautulli.js';
+import { realdebrid } from './realdebrid.js';
 
-const all = [sonarr, radarr, lidarr, readarr, prowlarr, bazarr, sabnzbd, nzbget, qbittorrent, transmission, deluge, overseerr, jellyseerr, tautulli];
+const all = [sonarr, radarr, lidarr, readarr, prowlarr, bazarr, sabnzbd, nzbget, qbittorrent, transmission, deluge, realdebrid, overseerr, jellyseerr, tautulli];
 
 export const adapters = Object.fromEntries(all.map((a) => [a.type, a]));
 
@@ -28,6 +29,7 @@ export function describeTypes() {
     globalActions: a.globalActions || [],
     canAdd: !!a.canAdd,
     speedLimit: !!a.speedLimit,
+    webUrl: a.webUrl || null,
     mediaLabel: a.mediaLabel || null,
     mediaSingular: a.mediaSingular || null,
   }));

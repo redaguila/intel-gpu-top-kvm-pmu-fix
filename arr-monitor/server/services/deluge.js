@@ -89,6 +89,7 @@ export const deluge = {
         .sort((a, b) => b[1].time_added - a[1].time_added)
         .map(([hash, t]) => ({
           id: hash,
+          hash,
           title: t.name,
           subtitle: [t.label, `ratio ${Math.max(0, toNum(t.ratio)).toFixed(2)}`, `${t.num_peers} peers`].filter(Boolean).join(' · '),
           size: toNum(t.total_size),

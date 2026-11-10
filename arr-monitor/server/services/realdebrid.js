@@ -60,18 +60,22 @@ export const realdebrid = {
         const size = toNum(t.bytes);
         const progress = toNum(t.progress);
         const speed = toNum(t.speed);
-        // A failed torrent will never finish, so it adds nothing to the remaining size.
-        const left = FAILED.has(t.status) ? 0 : size * (1 - progress / 100);
+        const failed = FAILED.has(t.status);
+        const left = size * (1 - progress / 100);
         return {
           id: t.id,
+          hash: t.hash,
           title: t.filename,
           subtitle: [t.host, t.links?.length ? `${t.links.length} link(s)` : null, t.seeders ? `${t.seeders} seeders` : null].filter(Boolean).join(' · '),
           size,
           sizeLeft: left,
           progress,
           status: STATUS[t.status] || t.status,
-          warning: FAILED.has(t.status) ? STATUS[t.status] : (t.status === 'waiting_files_selection' ? 'Select files on real-debrid.com to start this torrent' : null),
-          eta: speed > 0 ? Math.round(left / speed) : null,
+          warning: failed
+            ? 'Failed on Real-Debrid and will not recover. Delete it, then blocklist the release in its *arr app so it searches for another.'
+            : (t.status === 'waiting_files_selection' ? 'Select files on real-debrid.com to start this torrent' : null),
+          eta: !failed && speed > 0 ? Math.round(left / speed) : null,
+          failed,
           speed,
           protocol: 'torrent',
           completed: t.status === 'downloaded',

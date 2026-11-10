@@ -71,6 +71,7 @@ export const transmission = {
       const { torrents = [] } = await rpc(cfg, 'torrent-get', { fields: FIELDS });
       return torrents.sort((a, b) => b.addedDate - a.addedDate).map((t) => ({
         id: t.id,
+        hash: t.hashString,
         title: t.name,
         subtitle: [(t.labels || []).join(', '), `ratio ${Math.max(0, toNum(t.uploadRatio)).toFixed(2)}`, `${t.peersConnected} peers`].filter(Boolean).join(' · '),
         size: toNum(t.totalSize),

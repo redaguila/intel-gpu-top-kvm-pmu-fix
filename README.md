@@ -136,3 +136,7 @@ The host `render` group had GID 991 on the tested system, but this value varies.
 - The patch was tested against Intel GPU Tools 2.3; newer source versions may differ.
 - No kernel, i915 driver, or GPU passthrough changes were needed for the monitoring fix.
 - The Intel GPU Tools source remains under its upstream license. This repository documents a small source patch and reproduction steps.
+
+## See also
+
+**arr monitor**, the self-hosted dashboard for Sonarr, Radarr, Readarr, Prowlarr, download clients and Real-Debrid that briefly lived in this repository, now has its own home: <https://github.com/redaguila/arr-monitor> (Docker image `ghcr.io/redaguila/arr-monitor`).

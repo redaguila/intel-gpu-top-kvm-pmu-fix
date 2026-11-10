@@ -104,7 +104,8 @@ async function buildDashboard(store) {
     const tag = (items) => items.map((i) => ({ ...i, serviceId: svc.id, serviceName: entry.name, serviceType: svc.type, color: a.color }));
     const jobs = [];
     if (a.category === 'download' && a.resources.queue) {
-      jobs.push(a.resources.queue(svc).then((q) => { out.queue = tag(q.filter((i) => !i.completed)); }));
+      // Failed items (e.g. dead Real-Debrid torrents) won't recover; they're reported under Health instead.
+      jobs.push(a.resources.queue(svc).then((q) => { out.queue = tag(q.filter((i) => !i.completed && !i.failed)); }));
     }
     if (a.category === 'arr') {
       jobs.push(a.resources.calendar(svc, { start: start.toISOString(), end: end.toISOString() }).then((c) => { out.calendar = tag(c); }));
@@ -118,17 +119,24 @@ async function buildDashboard(store) {
 
   const services_ = results.map((r) => r.entry);
   const downloads = services_.filter((s) => s.category === 'download' && s.status.online);
+
+  // A torrent sent through rdt-client (or another client) to Real-Debrid shows up in both. Keep the
+  // client's row and drop the Real-Debrid copy, so it is listed and counted once.
+  const queue = results.flatMap((r) => r.queue);
+  const clientHashes = new Set(queue.filter((i) => i.serviceType !== 'realdebrid' && i.hash).map((i) => String(i.hash).toLowerCase()));
+  const dupes = new Set(queue.filter((i) => i.serviceType === 'realdebrid' && i.hash && clientHashes.has(String(i.hash).toLowerCase())));
+  const sumOf = (items, key) => [...items].reduce((a, i) => a + (i[key] || 0), 0);
   return {
     generatedAt: new Date().toISOString(),
     services: services_,
     totals: {
-      downloadSpeed: downloads.reduce((a, s) => a + (s.status.downloadSpeed || 0), 0),
+      downloadSpeed: Math.max(0, downloads.reduce((a, s) => a + (s.status.downloadSpeed || 0), 0) - sumOf(dupes, 'speed')),
       uploadSpeed: downloads.reduce((a, s) => a + (s.status.uploadSpeed || 0), 0),
-      sizeLeft: downloads.reduce((a, s) => a + (s.status.sizeLeft || 0), 0),
+      sizeLeft: Math.max(0, downloads.reduce((a, s) => a + (s.status.sizeLeft || 0), 0) - sumOf(dupes, 'sizeLeft')),
       online: services_.filter((s) => s.status.online).length,
       total: services_.length,
     },
-    queue: results.flatMap((r) => r.queue).sort((a, b) => (b.speed || 0) - (a.speed || 0)),
+    queue: queue.filter((i) => !dupes.has(i)).sort((a, b) => (b.speed || 0) - (a.speed || 0)),
     calendar: results.flatMap((r) => r.calendar).sort((a, b) => new Date(a.date) - new Date(b.date)),
     health: results.flatMap((r) => r.health),
   };

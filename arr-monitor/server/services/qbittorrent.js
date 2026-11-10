@@ -121,6 +121,7 @@ export const qbittorrent = {
       const noUpload = info && info.up_info_speed !== undefined && toNum(info.up_info_speed) === 0;
       return torrents.map((t) => ({
         id: t.hash,
+        hash: t.hash,
         title: t.name,
         subtitle: [t.category, `ratio ${toNum(t.ratio).toFixed(2)}`, `${t.num_seeds}/${t.num_leechs} peers`].filter(Boolean).join(' · '),
         size: toNum(t.size || t.total_size),

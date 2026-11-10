@@ -493,10 +493,13 @@ const TABS = {
     body.appendChild(wrap);
     const reload = await simpleTab(svc, wrap, token, 'queue', (items) => {
       if (!items.length) return `<div class="card">${empty('Queue is empty')}</div>`;
-      const active = items.filter((i) => !i.completed);
+      const active = items.filter((i) => !i.completed && !i.failed);
+      const failed = items.filter((i) => i.failed);
       const done = items.filter((i) => i.completed);
       return `<div class="card"><div class="card-h"><h2>${active.length} active</h2><div class="right muted small">${fmtBytes(active.reduce((a, i) => a + (i.sizeLeft || 0), 0))} left</div></div>
         <div class="card-b list">${active.length ? active.map((i) => queueRow({ ...i, color: type.color }, svc.id)).join('') : empty('Nothing downloading')}</div></div>
+        ${failed.length ? `<div class="card" style="margin-top:16px"><div class="card-h"><h2>Failed</h2><div class="right"><span class="tag err">${failed.length}</span></div></div>
+        <div class="card-b list">${failed.map((i) => queueRow({ ...i, color: type.color }, svc.id)).join('')}</div></div>` : ''}
         ${done.length ? `<div class="card" style="margin-top:16px"><div class="card-h"><h2>Completed / seeding</h2><div class="right"><span class="tag">${done.length}</span></div></div>
         <div class="card-b list">${done.map((i) => queueRow({ ...i, color: type.color }, svc.id)).join('')}</div></div>` : ''}`;
     }, { poll: 3000 });

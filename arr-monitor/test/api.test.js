@@ -293,7 +293,11 @@ test('real-debrid account, torrents, health and delete', async () => {
   assert.equal(q.length, 3);
   assert.equal(q[0].completed, true);
   assert.equal(q[1].status, 'Downloading');
-  assert.equal(q[2].warning, 'Magnet error');
+  assert.equal(q[2].failed, true);
+  assert.equal(q[2].status, 'Magnet error');
+  assert.match(q[2].warning, /will not recover/);
+  assert.equal(q[2].sizeLeft, q[2].size); // nothing downloaded, so it doesn't read as complete
+  assert.equal(q[2].eta, null);
   const health = await get(`/api/services/${id}/r/health`);
   assert.ok(health.some((h) => /expires in 5 day/.test(h.message)));
   assert.ok(health.some((h) => /1 torrent\(s\) failed/.test(h.message)));
@@ -374,6 +378,27 @@ test('dashboard aggregates everything and survives an offline service', async ()
   assert.ok(d.queue.some((q) => q.serviceType === 'sabnzbd'));
   assert.ok(d.queue.some((q) => q.serviceType === 'transmission'));
   assert.ok(d.queue.every((q) => !q.completed));
+  await call('DELETE', `/api/services/${off.data.id}`);
+});
+
+test('dashboard lists a torrent once when rdt-client and Real-Debrid both report it', async () => {
+  mock.state.rdTorrents.push({ id: 'RDDDD4', filename: 'Dead.Torrent', hash: '9'.repeat(40), bytes: 2e9, progress: 0, status: 'dead', links: [], added: new Date().toISOString() });
+  const d = await get('/api/dashboard');
+  const shared = 'f'.repeat(40);
+  assert.ok(d.queue.some((q) => q.serviceName === 'rdtclient' && q.hash === shared));
+  assert.ok(!d.queue.some((q) => q.serviceType === 'realdebrid' && q.hash === shared));
+  // Failed Real-Debrid torrents stay off the dashboard queue (they're under Health).
+  assert.ok(!d.queue.some((q) => q.failed));
+  assert.ok(d.health.some((h) => h.serviceType === 'realdebrid' && /failed on Real-Debrid/.test(h.message)));
+  // The duplicate's speed (50 MB/s on Real-Debrid) is not added on top of rdt-client's.
+  const others = d.services.filter((s) => s.category === 'download' && s.status.online && s.type !== 'realdebrid');
+  assert.equal(d.totals.downloadSpeed, others.reduce((a, s) => a + (s.status.downloadSpeed || 0), 0));
+  mock.state.rdTorrents = mock.state.rdTorrents.filter((t) => t.id !== 'RDDDD4');
+});
+
+test('dashboard calendar and health', async () => {
+  const off = await call('POST', '/api/services', { type: 'sonarr', name: 'Offline', url: 'http://127.0.0.1:1', apiKey: 'x' });
+  const d = await get('/api/dashboard');
   assert.ok(d.calendar.some((c) => c.serviceType === 'sonarr'));
   assert.ok(d.health.some((h) => h.serviceType === 'radarr'));
   await call('DELETE', `/api/services/${off.data.id}`);
